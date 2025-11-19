@@ -1,0 +1,242 @@
+Final Project: Distributed & NoSQL Systems
+Neo4j and Docker
+System Overview:
+•	Database: Neo4j Community Edition (graphical database)
+•	Application: Python 3.11 (Crud demonstration)
+•	Deployment: Docker Compose
+•	The following is the file structure for the project:
+o	Distributed-systems-neo4j/
+	Docker-compose.yml
+	Dockerfile – instructions to build the python app image
+	Requirements.txt – python dependencies which is neo4j
+	App/
+•	Crud_app.py – python app for crud logic for neo4j
+	Neo4j/
+•	Data/
+•	Logs/
+•	Import/
+Prior to the following installation steps ensure you are using openSUSE Linux. Best to use the kde plasma gui. 
+1.	Installation
+a.	Installing Docker Engine
+i.	sudo zipper refresh
+ii.	sudo zipper install docker
+iii.	sudo systemctl start docker 
+iv.	sudo systemctl enable docker
+b.	Install Docker Compose
+i.	sudo zipper install docker-compose
+c.	Manage user permissions to run docker without sudo
+i.	sudo usermod -aG docker $USER
+1.	Log out then log back in for change to take effect.
+2.	Create the main directory and the subdirectories for the project
+a.	mkdir distributed-systems-neo4j
+b.	cd distributed-systems-neo4j
+c.	mkdir app
+d.	mkdir -p neo4j/data neo4j/logs neo4j/import
+e.	Verify they are actually created
+f.	Ls -R
+3.	Create the content and populate the files you just made
+a.	cat > requirements.txt << ‘EOF’ 
+b.	neo4j 
+c.	EOF
+4.	Create the Docker file
+a.	cat > Dockerfile << ‘EOF’
+b.	From python: 3.11-slim
+c.	WORKDIR /app
+d.	COPY requirements.txt .
+e.	RUN pip install –no-cache-dir -r requirements.txt
+f.	COPY app/ /app/
+g.	EOF
+5.	Create necessary docker-compose.yml  
+a.	cat > docker-compose.yml << ‘EOF’
+i.	defines the neo4j database and the neo4j application (crud)
+1.	version: '3.8' # The Docker Compose file format version
+2.	
+3.	services:
+4.	
+5.	  # 1. The Neo4j Graph Database Service
+6.	  neo4j-db:
+7.	    # Using a specific, stable community image
+8.	    image: neo4j:5.21.0-community
+9.	    hostname: neo4j-db
+10.	    container_name: neo4j-db
+11.	
+12.	    # Expose the ports for external access (Neo4j Browser & Bolt)
+13.	    ports:
+14.	      - "7474:7474" # HTTP/Neo4j Browser
+15.	      - "7687:7687" # Bolt protocol for application driver connections
+16.	
+17.	    # Set up environment variables for initial configuration
+18.	    environment:
+19.	      # MANDATORY: Accept the Neo4j license agreement for the first run
+20.	      NEO4J_ACCEPT_LICENSE_AGREEMENT: 'yes'
+21.	      # Set the initial username and password (neo4j/secretpassword)
+22.	      NEO4J_AUTH: neo4j/secretpassword
+23.	      # *** FIX APPLIED HERE ***
+24.	      # Replaced obsolete NEO4J_DATABASE with the correct 5.x configuration key:
+25.	      NEO4J_dbms_default__database: finalProject
+26.	      # Set memory limits (REDUCED TO MINIMAL FOR STABILITY)
+27.	      NEO4J_server_memory_heap_initial__size: 256M
+28.	      NEO4J_server_memory_heap_max__size: 512M    
+29.	
+30.	    # Mount volumes to persist data, logs, and the import folder on the host machine
+31.	    volumes:
+32.	      - ./neo4j/data:/data          # /data is where the database itself is stored
+33.	      - ./neo4j/logs:/logs          # /logs stores Neo4j log files
+34.	      - ./neo4j/import:/var/lib/neo4j/import # /import is used for bulk data loading
+35.	
+36.	    # Always restart the container if it stops unexpectedly
+37.	    restart: unless-stopped
+38.	
+39.	  # 2. Your Python CRUD Application Service
+40.	  neo4j-app:
+41.	    # Build the image from the local Dockerfile in the current directory
+42.	    build: .
+43.	    container_name: neo4j-app
+44.	
+45.	    # DEPENDS_ON BLOCK HAS BEEN REMOVED ENTIRELY.
+46.	    # We rely 100% on the 5-minute retry logic in crud_app.py
+47.	    # depends_on:
+48.	    #   neo4j-db:
+49.	    #     condition: service_healthy
+50.	
+51.	    # Pass connection details to the application environment
+52.	    environment:
+53.	      # Connection URI uses the internal Docker network name (neo4j-db)
+54.	      NEO4J_URI: bolt://neo4j-db:7687
+55.	      NEO4J_USER: neo4j
+56.	      NEO4J_PASSWORD: secretpassword
+57.	      NEO4J_DATABASE: finalProject # Used by the Python app to specify the target database
+58.	
+59.	    # Command to run the Python application when the container starts
+60.	    command: python /app/crud_app.py
+61.	
+62.	    # Mount the app folder for live code changes during development
+63.	    volumes:
+64.	      - ./app:/app
+65.	
+66.	    # Restart policy for the application
+67.	    restart: on-failure
+EOF
+6.	Navigate to the app directory. Create the Python app file  (crud_app.py) inside the app/ directory
+a.	cat > app/crud_app.py << ‘EOF’
+import os
+import sys
+import time # Import the time module for retries
+from neo4j import GraphDatabase, AsyncGraphDatabase
+from neo4j.exceptions import ServiceUnavailable
+
+# --- Configuration ---
+# Uses environment variables set in docker-compose.yml
+URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+USER = os.getenv("NEO4J_USER", "neo4j")
+PASSWORD = os.getenv("NEO4J_PASSWORD", "secretpassword")
+DATABASE = os.getenv("NEO4J_DATABASE", "finalProject")
+
+# A simple CRUD transaction function
+def run_crud_example(driver):
+    """Executes basic CRUD operations on the Neo4j database."""
+    print("--- Starting CRUD Operations ---")
+    
+    try:
+        # Create a simple session
+        with driver.session(database=DATABASE) as session:
+            
+            # 1. CREATE Operation: Create a new node (Task)
+            create_query = "CREATE (n:Task {id: 'T1', name: $name, status: 'New'}) RETURN n.name AS name"
+            result = session.run(create_query, name="Distributed Systems Project Setup")
+            message = result.single()["name"]
+            print(f"1. CREATE successful. Node created: '{message}'")
+            
+            # 2. READ Operation: Read the node back
+            read_query = "MATCH (n:Task {id: 'T1'}) RETURN n.name AS name, n.status AS status"
+            result = session.run(read_query)
+            record = result.single()
+            print(f"2. READ successful. Task: {record['name']}, Status: {record['status']}")
+            
+            # 3. UPDATE Operation: Change the status
+            update_query = "MATCH (n:Task {id: 'T1'}) SET n.status = 'In Progress', n.updatedAt = datetime() RETURN n.status AS new_status"
+            result = session.run(update_query)
+            new_status = result.single()["new_status"]
+            print(f"3. UPDATE successful. New Status: {new_status}")
+            
+            # 4. EXPAND: Create a second node (Person) and a Relationship
+            # Create a Person node
+            session.run("MERGE (p:Person {name: 'Jane Doe', role: 'Team Lead'})")
+            print("4a. EXPAND successful. Node created: 'Jane Doe'")
+
+            # Create the relationship between the Person and the Task
+            relationship_query = """
+            MATCH (p:Person {name: 'Jane Doe'}), (t:Task {id: 'T1'})
+            MERGE (p)-[:RESPONSIBLE_FOR {assigned_date: date()}]->(t)
+            RETURN type(p) AS PersonType, type(t) AS TaskType
+            """
+            session.run(relationship_query)
+            print("4b. EXPAND successful. Relationship created: Person -> RESPONSIBLE_FOR -> Task")
+
+
+            # 5. VERIFY: Read the relationship back
+            verify_query = """
+            MATCH (p:Person {name: 'Jane Doe'})-[r:RESPONSIBLE_FOR]->(t:Task {id: 'T1'})
+            RETURN p.name AS Responsible, t.name AS Task, type(r) AS Relationship
+            """
+            result = session.run(verify_query)
+            record = result.single()
+            print(f"5. VERIFY successful. Relationship found: {record['Responsible']} is {record['Relationship']} {record['Task']}")
+
+
+            # 6. CLEANUP (Skipped to persist data for inspection)
+            # delete_query = "MATCH (n:Task {id: 'T1'}) DELETE n"
+            # session.run(delete_query)
+            # print("6. DELETE skipped. Node intentionally left in database for verification.")
+            print("6. DELETE Operation SKIPPED. The graph structure is now saved to the database for inspection.")
+
+    except Exception as e:
+        print(f"An error occurred during Neo4j interaction: {e}")
+        # Exit with error code so the container shows failure
+        sys.exit(1)
+    
+    print("--- CRUD Operations Complete ---")
+
+# Function to connect with a retry mechanism
+# INCREASED RETRIES TO 120 attempts with a 5-second delay (600 seconds total / 10 minutes)
+def connect_with_retry(uri, auth, max_retries=120, delay_seconds=5):
+    """Initializes the Neo4j Driver, retrying on connection failure."""
+    for attempt in range(max_retries):
+        try:
+            driver = GraphDatabase.driver(uri, auth=auth)
+            # Verify connectivity using a quick transaction
+            driver.verify_connectivity()
+            print(f"Neo4j database connection established successfully at {uri}!")
+            return driver
+        except ServiceUnavailable as e:
+            print(f"Connection attempt {attempt + 1}/{max_retries} failed. Retrying in {delay_seconds}s...")
+            if attempt < max_retries - 1:
+                time.sleep(delay_seconds)
+            else:
+                raise # Re-raise the exception if all retries fail
+        except Exception as e:
+            # Handle other driver-related errors (like auth errors, network errors)
+            raise e
+    return None
+
+# Main execution block
+if __name__ == "__main__":
+    driver = None
+    try:
+        # Use the retry function to initialize the driver
+        driver = connect_with_retry(URI, auth=(USER, PASSWORD))
+        
+        # Only run CRUD if the driver object was successfully created
+        if driver:
+            run_crud_example(driver)
+
+    except Exception as e:
+        print(f"Failed to connect to Neo4j after multiple retries. Error: {e}")
+        sys.exit(1)
+        
+    finally:
+        # Close the driver connection
+        if driver:
+            driver.close()
+            print("Neo4j driver closed.")
+EOF
