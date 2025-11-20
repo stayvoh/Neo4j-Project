@@ -240,3 +240,24 @@ if __name__ == "__main__":
             driver.close()
             print("Neo4j driver closed.")
 EOF
+7.	Navigate to the directory containing the docker-compose.yml file
+a.	cd distributed-systems-neo4j
+8.	perform build and initial deployment.
+a.	Docker compose up –build -d
+9.	Verify Service status
+a.	Wait for about 20 -30 seconds
+b.	Docker compose ps
+c.	Verify containers are up and running
+10.	Verify the crud and graph are running 
+a.	It will take around 1 minute for the database to be ready so it will show a few errors for connectivity 
+b.	Use docker compose logs -f neo4j-app
+c.	Should see Create successful. Node created: ‘Distributed Systems Project Setup’ along with the other crud outputs.
+11.	Open the web browser and access neo4j
+a.	http://localhost:7474/
+b.	Login: Username is neo4j password is secretpassword
+12.	Verify graph structure (nodes and relationships)
+a.	In the command bar run the cypher query to get the graph and relationships
+b.	MATCH (p:Person)-[r]->(t:Task) RETURN p, r, t
+c.	Should see a blue person node connected by a RESPONSIBLE_FOR relationship to a green Task node.
+13.	Verify all data persists in DB.
+a.	MATCH (n) RETURN n LIMIT 25.
